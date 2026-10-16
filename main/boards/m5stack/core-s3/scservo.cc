@@ -22,6 +22,12 @@ ScServo::~ScServo() {
 }
 
 void ScServo::init() {
+    // Shared UART bus: install driver only once (yaw + pitch both use UART1)
+    static bool driver_installed = false;
+    if (!driver_installed) {
+        uart_driver_install(uart_num_, 256, 256, 0, nullptr, 0);
+        driver_installed = true;
+    }
     uart_config_t config = {
         .baud_rate = 1000000,
         .data_bits = UART_DATA_8_BITS,
@@ -30,10 +36,8 @@ void ScServo::init() {
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
         .source_clk = UART_SCLK_DEFAULT,
     };
-    uart_driver_install(uart_num_, 256, 256, 0, nullptr, 0);
     uart_param_config(uart_num_, &config);
     uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    // Half-duplex: disable RX during TX to avoid loopback confusion
     ESP_LOGI(TAG, "Servo %d initialized on UART%d", servo_id_, uart_num_);
 }
 

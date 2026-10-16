@@ -1,0 +1,8 @@
+﻿git : To github.com:coldwaterpoolstudio-byte/xiaozhi-stackchan-servo.git
+At line:1 char:263
++ ...  files including generated_assets"; git push origin main 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To github.com:c...kchan-servo.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   d1267d6..d15a468  main -> main

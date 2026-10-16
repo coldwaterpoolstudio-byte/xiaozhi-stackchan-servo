@@ -1,0 +1,8 @@
+﻿branch 'main' set up to track 'origin/main'.
+git : Everything up-to-date
+At line:1 char:161
++ ... rc\xiaozhi-esp32-main"; cd $src; git push -u origin main 2>&1 | Out-F ...
++                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Everything up-to-date:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 

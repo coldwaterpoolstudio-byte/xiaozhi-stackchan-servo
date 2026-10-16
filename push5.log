@@ -1,0 +1,8 @@
+﻿git : To github.com:coldwaterpoolstudio-byte/xiaozhi-stackchan-servo.git
+At line:1 char:273
++ ... to 40MHz for IDF v6 compatibility"; git push origin main 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To github.com:c...kchan-servo.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   f456343..a7ecf25  main -> main

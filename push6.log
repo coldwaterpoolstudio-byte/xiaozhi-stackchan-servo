@@ -1,0 +1,8 @@
+﻿git : To github.com:coldwaterpoolstudio-byte/xiaozhi-stackchan-servo.git
+At line:1 char:276
++ ... t for correct CoreS3 PSRAM config"; git push origin main 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To github.com:c...kchan-servo.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   a7ecf25..ebd5c38  main -> main
