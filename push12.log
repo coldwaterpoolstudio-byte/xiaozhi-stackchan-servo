@@ -1,0 +1,8 @@
+﻿git : To github.com:coldwaterpoolstudio-byte/xiaozhi-stackchan-servo.git
+At line:1 char:260
++ ... return ToolResult not ReturnValue"; git push origin main 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To github.com:c...kchan-servo.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   be7a798..022d304  main -> main
