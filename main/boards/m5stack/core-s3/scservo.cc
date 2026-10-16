@@ -14,8 +14,8 @@ static constexpr uint8_t kRegGoalSpeed = 0x2E;      // 2 bytes, big-endian
 static constexpr uint8_t kRegTorqueEnable = 0x28;   // 1 byte
 static constexpr uint8_t kRegCurrentPosition = 0x38; // 2 bytes, big-endian, read-only
 
-ScServo::ScServo(uart_port_t uart_num, gpio_num_t tx_pin, gpio_num_t rx_pin, int servo_id)
-    : uart_num_(uart_num), tx_pin_(tx_pin), rx_pin_(rx_pin), servo_id_(servo_id) {}
+ScServo::ScServo(uart_port_t uart_num, gpio_num_t tx_pin, gpio_num_t rx_pin, int servo_id, int center_raw)
+    : uart_num_(uart_num), tx_pin_(tx_pin), rx_pin_(rx_pin), servo_id_(servo_id), center_raw_(center_raw) {}
 
 ScServo::~ScServo() {
     uart_driver_delete(uart_num_);
@@ -122,16 +122,15 @@ bool ScServo::readRegister(uint8_t reg, uint8_t* data, size_t len, int timeout_m
 }
 
 int ScServo::angleToRaw(int angle_01deg) {
-    // Map 0.1-degree angle to SCS0009 raw position (0~1023)
-    // Center (0 deg) = 512, positive = clockwise
-    int raw = kRawCenter + (int)(angle_01deg * kRawPer01Deg);
-    if (raw < 0) raw = 0;
-    if (raw > 1023) raw = 1023;
+    // Official StackChan: 0.32 raw per 0.1 degree (16/5/10), raw range 0~1000
+    int raw = center_raw_ + (int)(angle_01deg * kRawPer01Deg);
+    if (raw < kRawMin) raw = kRawMin;
+    if (raw > kRawMax) raw = kRawMax;
     return raw;
 }
 
 int ScServo::rawToAngle(int raw) {
-    return (int)((raw - kRawCenter) / kRawPer01Deg);
+    return (int)((raw - center_raw_) / kRawPer01Deg);
 }
 
 void ScServo::move(int position_01deg) {

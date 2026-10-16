@@ -1,0 +1,8 @@
+﻿git : To github.com:coldwaterpoolstudio-byte/xiaozhi-stackchan-servo.git
+At line:1 char:254
++ ... ader search to skip loopback data"; git push origin main 2>&1 | Out-F ...
++                                         ~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (To github.com:c...kchan-servo.git:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+   498d0d9..9819884  main -> main

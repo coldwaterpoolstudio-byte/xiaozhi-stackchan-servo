@@ -1,56 +1,53 @@
 #include "servo_mcp_tool.h"
+#include "scservo.h"
 #include <esp_log.h>
-#include <cstdio>
+#include <memory>
+#include "mcp/mcp_server.h"
+#include "mcp/mcp_tool.h"
 
 static const char* TAG = "ServoMcp";
-
-// StackChan servo IDs: yaw=1, pitch=2
-static constexpr int kYawServoId = 1;
-static constexpr int kPitchServoId = 2;
 
 ServoMcpTool::ServoMcpTool() {}
 
 ServoMcpTool::~ServoMcpTool() {}
 
 void ServoMcpTool::Initialize() {
-    // UART1: TX=GPIO6, RX=GPIO7, 1Mbps (StackChan servo bus)
-    yaw_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_6, GPIO_NUM_7, kYawServoId);
-    pitch_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_6, GPIO_NUM_7, kPitchServoId);
+    ESP_LOGI(TAG, "Initializing SCS0009 servos on UART1 (GPIO6 TX, GPIO7 RX)");
+
+    // Official StackChan zero positions: yaw=460, pitch=620
+    yaw_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_6, GPIO_NUM_7, 1, 460);
+    pitch_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_6, GPIO_NUM_7, 2, 620);
+
     yaw_servo_->init();
     pitch_servo_->init();
+
     yaw_servo_->setTorque(true);
     pitch_servo_->setTorque(true);
 
-    // Move to home position
-    yaw_servo_->moveWithSpeed(0, 300);
-    pitch_servo_->moveWithSpeed(450, 300);  // pitch center ~45deg
+    // Move to home (center) position
+    vTaskDelay(pdMS_TO_TICKS(100));
+    yaw_servo_->moveWithSpeed(0, 300);   // yaw center
+    pitch_servo_->moveWithSpeed(0, 300); // pitch center
 
+    // Register MCP tools (same names as official StackChan firmware)
     auto& mcp_server = McpServer::GetInstance();
 
-    // get_head_angles
     mcp_server.AddTool(
         "self.robot.get_head_angles",
-        "Returns current yaw/pitch in degrees. Neutral position is {yaw:0, pitch:45}. "
-        "Yaw: negative=left, positive=right. Pitch: 0=down, 90=up.",
+        "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(0 to 90, 90=up).",
         std::vector<Property>{},
         [this](const PropertyList& properties) -> ReturnValue {
-            int yaw = yaw_servo_->getCurrentAngle() / 10;
-            int pitch = pitch_servo_->getCurrentAngle() / 10;
+            (void)properties;
+            int yaw = yaw_servo_ ? yaw_servo_->getCurrentAngle() / 10 : 0;
+            int pitch = pitch_servo_ ? pitch_servo_->getCurrentAngle() / 10 : 0;
             char buf[64];
             snprintf(buf, sizeof(buf), "{\"yaw\": %d, \"pitch\": %d}", yaw, pitch);
-            ESP_LOGI(TAG, "get_head_angles: %s", buf);
             return std::string(buf);
         });
 
-    // set_head_angles
     mcp_server.AddTool(
         "self.robot.set_head_angles",
-        "Move the robot's head. GUIDELINES: "
-        "1. For natural interaction, stay within yaw +/-45, pitch 20~70. "
-        "2. Only use extreme values if user explicitly asks to look far away/behind. "
-        "3. Ranges: yaw(-128 to 128, negative=your left), pitch(0 to 90, 90=up). "
-        "4. speed(100-1000, 150=natural, 500=fast). "
-        "5. Use -9999 for yaw or pitch to leave that axis unchanged.",
+        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(0 to 90, 90=up), speed(100-1000, default 150). Pass -9999 to leave an axis unchanged.",
         PropertyList({
             Property("yaw", kPropertyTypeInteger, -9999, -9999, 128),
             Property("pitch", kPropertyTypeInteger, -9999, -9999, 90),
@@ -60,13 +57,10 @@ void ServoMcpTool::Initialize() {
             int yaw = properties["yaw"].value<int>();
             int pitch = properties["pitch"].value<int>();
             int speed = properties["speed"].value<int>();
-
-            ESP_LOGI(TAG, "set_head_angles: yaw=%d pitch=%d speed=%d", yaw, pitch, speed);
-
-            if (yaw != -9999) {
+            if (yaw != -9999 && yaw_servo_) {
                 yaw_servo_->moveWithSpeed(yaw * 10, speed);
             }
-            if (pitch != -9999) {
+            if (pitch != -9999 && pitch_servo_) {
                 pitch_servo_->moveWithSpeed(pitch * 10, speed);
             }
             return true;
