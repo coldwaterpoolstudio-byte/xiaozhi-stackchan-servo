@@ -1,9 +1,8 @@
 #include "servo_mcp_tool.h"
 #include "scservo.h"
+#include "mcp_server.h"
 #include <esp_log.h>
 #include <memory>
-#include "mcp/mcp_server.h"
-#include "mcp/mcp_tool.h"
 
 static const char* TAG = "ServoMcp";
 
@@ -35,14 +34,14 @@ void ServoMcpTool::Initialize() {
     mcp_server.AddTool(
         "self.robot.get_head_angles",
         "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(0 to 90, 90=up).",
-        std::vector<Property>{},
-        [this](const PropertyList& properties) -> ReturnValue {
+        PropertyList(),
+        [this](const PropertyList& properties) -> ToolResult {
             (void)properties;
             int yaw = yaw_servo_ ? yaw_servo_->getCurrentAngle() / 10 : 0;
             int pitch = pitch_servo_ ? pitch_servo_->getCurrentAngle() / 10 : 0;
             char buf[64];
             snprintf(buf, sizeof(buf), "{\"yaw\": %d, \"pitch\": %d}", yaw, pitch);
-            return std::string(buf);
+            return ReturnValue(std::string(buf));
         });
 
     mcp_server.AddTool(
@@ -53,7 +52,7 @@ void ServoMcpTool::Initialize() {
             Property("pitch", kPropertyTypeInteger, -9999, -9999, 90),
             Property("speed", kPropertyTypeInteger, 150, 100, 1000),
         }),
-        [this](const PropertyList& properties) -> ReturnValue {
+        [this](const PropertyList& properties) -> ToolResult {
             int yaw = properties["yaw"].value<int>();
             int pitch = properties["pitch"].value<int>();
             int speed = properties["speed"].value<int>();
@@ -63,7 +62,7 @@ void ServoMcpTool::Initialize() {
             if (pitch != -9999 && pitch_servo_) {
                 pitch_servo_->moveWithSpeed(pitch * 10, speed);
             }
-            return true;
+            return ReturnValue(true);
         });
 
     ESP_LOGI(TAG, "Servo MCP tools registered");
