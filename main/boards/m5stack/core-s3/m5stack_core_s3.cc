@@ -192,6 +192,21 @@ private:
         ESP_LOGI(TAG, "Init AW9523");
         aw9523_ = new Aw9523(i2c_bus_, 0x58);
         vTaskDelay(pdMS_TO_TICKS(50));
+
+        // Ensure StackChan base 5V output: BOOST_EN=P1_7, BUS_OUT_EN=P0_1
+        // Aw9523 constructor already sets these, but re-assert defensively
+        // in case future firmware changes the default register values.
+        // AW9523B: 0x02=P0 out, 0x03=P1 out, 0x04=P0 dir, 0x05=P1 dir
+        uint8_t p0_dir = aw9523_->ReadReg(0x04);
+        aw9523_->WriteReg(0x04, p0_dir & ~(1 << 1));  // P0_1 output
+        uint8_t p1_dir = aw9523_->ReadReg(0x05);
+        aw9523_->WriteReg(0x05, p1_dir & ~(1 << 7));  // P1_7 output
+        uint8_t p0_out = aw9523_->ReadReg(0x02);
+        aw9523_->WriteReg(0x02, p0_out | (1 << 1));   // BUS_OUT_EN high
+        uint8_t p1_out = aw9523_->ReadReg(0x03);
+        aw9523_->WriteReg(0x03, p1_out | (1 << 7));   // BOOST_EN high
+        ESP_LOGI(TAG, "Base 5V ensured (BOOST_EN=P1_7, BUS_OUT_EN=P0_1)");
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     void PollTouchpad() {
