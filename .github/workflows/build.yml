@@ -18,6 +18,8 @@ jobs:
         run: |
           cp sdkconfig.defaults.esp32s3 sdkconfig
           echo "CONFIG_BOARD_TYPE_M5STACK_CORE_S3=y" >> sdkconfig
+          echo "CONFIG_SPIRAM_SPEED_40M=y" >> sdkconfig
+          echo "# CONFIG_SPIRAM_SPEED_80M is not set" >> sdkconfig
 
       - name: Build
         run: |
