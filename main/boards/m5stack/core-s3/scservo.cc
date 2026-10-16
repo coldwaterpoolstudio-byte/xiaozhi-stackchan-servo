@@ -84,18 +84,41 @@ bool ScServo::readRegister(uint8_t reg, uint8_t* data, size_t len, int timeout_m
     packet[7] = checksum(packet, 8);
     sendPacket(packet, 8);
 
-    // Read response: 0xFF 0xFF ID Length Error [data...] Checksum
-    uint8_t resp[16];
-    size_t expected = 6 + len;  // header(2) + id(1) + length(1) + error(1) + data(len) + checksum(1)
-    int rx_len = uart_read_bytes(uart_num_, resp, expected, pdMS_TO_TICKS(timeout_ms));
-    if (rx_len < expected) {
-        return false;
+    // Half-duplex: the sent command loops back into RX before the servo response.
+    // Search for frame header 0xFF 0xFF ID, then use Length byte to distinguish
+    // loopback (Length=0x04 for READ cmd) from real response (Length=len+2).
+    uint8_t byte;
+    int state = 0;  // 0=wait 0xFF, 1=wait 0xFF, 2=wait ID
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+
+    while (xTaskGetTickCount() < deadline) {
+        if (uart_read_bytes(uart_num_, &byte, 1, pdMS_TO_TICKS(10)) != 1) continue;
+        if (state == 0 && byte == 0xFF) { state = 1; continue; }
+        if (state == 1 && byte == 0xFF) { state = 2; continue; }
+        if (state == 2 && byte == servo_id_) {
+            // Peek Length byte
+            uint8_t length_byte;
+            if (uart_read_bytes(uart_num_, &length_byte, 1, pdMS_TO_TICKS(50)) != 1) {
+                state = 0; continue;
+            }
+            if (length_byte == 0x04) {
+                // Loopback READ command: skip remaining 4 bytes (inst, reg, count, checksum)
+                uint8_t discard[4];
+                uart_read_bytes(uart_num_, discard, 4, pdMS_TO_TICKS(50));
+                state = 0;
+                continue;
+            }
+            // Real response: Length=len+2, followed by Error(1), Data(len), Checksum(1)
+            uint8_t error_byte;
+            if (uart_read_bytes(uart_num_, &error_byte, 1, pdMS_TO_TICKS(50)) != 1) return false;
+            if (uart_read_bytes(uart_num_, data, len, pdMS_TO_TICKS(timeout_ms)) != (int)len) return false;
+            uint8_t checksum_byte;
+            uart_read_bytes(uart_num_, &checksum_byte, 1, pdMS_TO_TICKS(50));
+            return true;
+        }
+        state = 0;
     }
-    if (resp[0] != 0xFF || resp[1] != 0xFF || resp[2] != servo_id_) {
-        return false;
-    }
-    memcpy(data, &resp[5], len);
-    return true;
+    return false;
 }
 
 int ScServo::angleToRaw(int angle_01deg) {
