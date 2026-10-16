@@ -149,16 +149,18 @@ void ScServo::move(int position_01deg) {
 void ScServo::moveWithSpeed(int position_01deg, int speed_0_1000) {
     int raw_pos = angleToRaw(position_01deg);
     ESP_LOGI(TAG, "Servo %d move: angle=%d raw=%d speed=%d", servo_id_, position_01deg, raw_pos, speed_0_1000);
-    // SCS series: big-endian (high byte first)
-    uint8_t pos_data[2] = {(uint8_t)((raw_pos >> 8) & 0xFF), (uint8_t)(raw_pos & 0xFF)};
-    writeRegister(kRegGoalPosition, pos_data, 2);
 
-    // Speed: map 0~1000 to 0~1023
+    // Write speed FIRST, then position — otherwise servo starts moving with
+    // previous (possibly zero) speed and the new speed never triggers.
     int raw_speed = speed_0_1000;
     if (raw_speed < 0) raw_speed = 0;
     if (raw_speed > 1023) raw_speed = 1023;
     uint8_t speed_data[2] = {(uint8_t)((raw_speed >> 8) & 0xFF), (uint8_t)(raw_speed & 0xFF)};
     writeRegister(kRegGoalSpeed, speed_data, 2);
+
+    // SCS series: big-endian (high byte first)
+    uint8_t pos_data[2] = {(uint8_t)((raw_pos >> 8) & 0xFF), (uint8_t)(raw_pos & 0xFF)};
+    writeRegister(kRegGoalPosition, pos_data, 2);
 }
 
 int ScServo::getCurrentAngle() {
