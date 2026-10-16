@@ -32,8 +32,8 @@ jobs:
         with:
           name: xiaozhi-stackchan-servo-firmware
           path: |
-            build/xiaozhi.bin
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
+            build/*.bin
+            build/bootloader/*.bin
+            build/partition_table/*.bin
             build/flasher_args.json
           retention-days: 30
