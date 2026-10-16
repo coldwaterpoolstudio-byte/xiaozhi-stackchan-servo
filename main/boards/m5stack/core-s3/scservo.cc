@@ -42,9 +42,8 @@ void ScServo::init() {
     ESP_LOGI(TAG, "uart_param_config ret=%d", ret);
     ret = uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
     ESP_LOGI(TAG, "uart_set_pin ret=%d tx=%d rx=%d", ret, tx_pin_, rx_pin_);
-    // Release TX line (high-Z) for half-duplex bus
-    gpio_reset_pin(tx_pin_);
-    gpio_set_direction(tx_pin_, GPIO_MODE_INPUT);
+    // Keep TX as UART output for write operations (servo does not reply to WRITE).
+    // Only release TX during READ operations.
     ESP_LOGI(TAG, "Servo %d initialized on UART%d (tx=%d rx=%d)", servo_id_, uart_num_, tx_pin_, rx_pin_);
 }
 
@@ -57,17 +56,12 @@ uint8_t ScServo::checksum(const uint8_t* data, size_t len) {
 }
 
 void ScServo::sendPacket(const uint8_t* data, size_t len) {
-    // Re-attach TX pin to UART for half-duplex transmission
-    uart_set_pin(uart_num_, tx_pin_, rx_pin_, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    // Flush RX buffer before sending (half-duplex loopback)
+    // TX stays as UART output (write-only path). Flush RX loopback first.
     uart_flush_input(uart_num_);
     int written = uart_write_bytes(uart_num_, data, len);
     uart_wait_tx_done(uart_num_, pdMS_TO_TICKS(50));
-    // Release TX pin from UART and set high-Z so servo can drive the bus
-    gpio_reset_pin(tx_pin_);
-    gpio_set_direction(tx_pin_, GPIO_MODE_INPUT);
-    // Small delay for servo to process
-    vTaskDelay(pdMS_TO_TICKS(2));
+    // Small delay for servo to process the command
+    vTaskDelay(pdMS_TO_TICKS(3));
     if (written != (int)len) {
         ESP_LOGW(TAG, "sendPacket: wrote %d/%d bytes for servo %d", written, len, servo_id_);
     }
