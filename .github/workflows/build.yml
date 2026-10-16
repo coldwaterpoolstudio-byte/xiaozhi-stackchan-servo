@@ -14,18 +14,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure board
-        run: |
-          cp sdkconfig.defaults.esp32s3 sdkconfig
-          echo "CONFIG_BOARD_TYPE_M5STACK_CORE_S3=y" >> sdkconfig
-          echo "CONFIG_SPIRAM_SPEED_40M=y" >> sdkconfig
-          echo "# CONFIG_SPIRAM_SPEED_80M is not set" >> sdkconfig
-
-      - name: Build
+      - name: Build with official build script
         run: |
           . $IDF_PATH/export.sh
-          idf.py set-target esp32s3
-          idf.py build
+          python scripts/build.py m5stack-core-s3
 
       - name: Upload firmware
         uses: actions/upload-artifact@v4
