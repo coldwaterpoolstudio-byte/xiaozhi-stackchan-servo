@@ -11,6 +11,7 @@ static constexpr uint8_t kScsInstRead = 0x02;
 
 // SCS0009 registers (SCS series: big-endian, high byte first)
 static constexpr uint8_t kRegGoalPosition = 0x2A;  // 2 bytes, big-endian
+static constexpr uint8_t kRegGoalTime = 0x2C;       // 2 bytes, big-endian; effective when speed=0
 static constexpr uint8_t kRegGoalSpeed = 0x2E;      // 2 bytes, big-endian
 static constexpr uint8_t kRegTorqueEnable = 0x28;   // 1 byte
 static constexpr uint8_t kRegCurrentPosition = 0x38; // 2 bytes, big-endian, read-only
@@ -48,8 +49,10 @@ void ScServo::init() {
 }
 
 uint8_t ScServo::checksum(const uint8_t* data, size_t len) {
+    // SCS protocol: checksum = ~(ID + Length + Instruction + Address + Data...)
+    // Must NOT include the checksum byte itself (at data[len-1], still uninitialized).
     uint16_t sum = 0;
-    for (size_t i = 2; i < len; i++) {  // skip 0xFF 0xFF header
+    for (size_t i = 2; i < len - 1; i++) {  // skip header AND checksum byte
         sum += data[i];
     }
     return (uint8_t)(~sum);
@@ -150,17 +153,21 @@ void ScServo::moveWithSpeed(int position_01deg, int speed_0_1000) {
     int raw_pos = angleToRaw(position_01deg);
     ESP_LOGI(TAG, "Servo %d move: angle=%d raw=%d speed=%d", servo_id_, position_01deg, raw_pos, speed_0_1000);
 
-    // Write speed FIRST, then position — otherwise servo starts moving with
-    // previous (possibly zero) speed and the new speed never triggers.
-    int raw_speed = speed_0_1000;
-    if (raw_speed < 0) raw_speed = 0;
-    if (raw_speed > 1023) raw_speed = 1023;
-    uint8_t speed_data[2] = {(uint8_t)((raw_speed >> 8) & 0xFF), (uint8_t)(raw_speed & 0xFF)};
-    writeRegister(kRegGoalSpeed, speed_data, 2);
-
-    // SCS series: big-endian (high byte first)
-    uint8_t pos_data[2] = {(uint8_t)((raw_pos >> 8) & 0xFF), (uint8_t)(raw_pos & 0xFF)};
-    writeRegister(kRegGoalPosition, pos_data, 2);
+    // SCS0009 requires CONTIGUOUS write from 0x2A: GoalPos(2) + GoalTime(2) + GoalSpeed(2)
+    // Writing them as separate register writes can leave servo at default speed=0 (stopped).
+    // Reference: Qiita Ninagawa123 SCS0009 direct drive example.
+    uint8_t data[6];
+    // Goal Position (big-endian)
+    data[0] = (uint8_t)((raw_pos >> 8) & 0xFF);
+    data[1] = (uint8_t)(raw_pos & 0xFF);
+    // Goal Time = 20 (matches official StackChan WritePos Time=20)
+    // When speed=0, Operating Time takes effect; official uses Time=20.
+    data[2] = 0x00;
+    data[3] = 20;
+    // Goal Speed = 0 (matches official StackChan WritePos Speed=0)
+    data[4] = 0x00;
+    data[5] = 0x00;
+    writeRegister(kRegGoalPosition, data, 6);
 }
 
 int ScServo::getCurrentAngle() {
