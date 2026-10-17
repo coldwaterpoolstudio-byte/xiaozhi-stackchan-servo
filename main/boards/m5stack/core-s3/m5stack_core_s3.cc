@@ -34,11 +34,28 @@ public:
         WriteReg(0x90, 0xBF);
         WriteReg(0x94, 33 - 5);
         WriteReg(0x95, 33 - 5);
+        // Official StackChan charging parameters
+        WriteReg(0x27, 0x00);  // Charge cutoff 4.1V (official)
+        // Set charge current to 700mA (register 0x62, value=13)
+        uint8_t chg = ReadReg(0x62);
+        chg = (chg & 0xE0) | 13;  // clear low 5 bits, set 700mA
+        WriteReg(0x62, chg);
+        ESP_LOGI(TAG, "Charging params set: cutoff=4.1V, current=700mA");
     }
 
     void SetBrightness(uint8_t brightness) {
         brightness = ((brightness + 641) >> 5);
         WriteReg(0x99, brightness);
+    }
+
+    // Official StackChan external power detection:
+    // any non-discharging state (charging, full, or idle with cable) = externally powered.
+    // More reliable than VBUS-present bit (0x00 bit6) which can stay unset on some USB ports.
+    bool IsExternalPowerConnected() {
+        const uint8_t power_status      = ReadReg(0x01);
+        const uint8_t current_direction = (power_status & 0b01100000) >> 5;
+        const bool is_charging_done     = (power_status & 0b00000111) == 0b00000100;
+        return current_direction != 2 || is_charging_done;
     }
 };
 
@@ -299,7 +316,8 @@ private:
     ServoMcpTool* servo_mcp_;
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(-1, 120, 1200);
+        // (-1 = no CPU throttle, 120s = screen dim, 3600s = 1 hour auto shutdown)
+        power_save_timer_ = new PowerSaveTimer(-1, 120, 3600);
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
             GetBacklight()->SetBrightness(10);
@@ -309,8 +327,10 @@ private:
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this]() {
-            if (pmic_->IsVbusPresent()) {
-                ESP_LOGI(TAG, "VBUS present, skip power off (stay in sleep mode)");
+            // Use official detection: any non-discharging state = externally powered.
+            // More reliable than VBUS-present bit which can stay unset on some USB ports.
+            if (pmic_->IsExternalPowerConnected()) {
+                ESP_LOGI(TAG, "External power connected, skip power off (stay in sleep mode)");
                 return;
             }
             pmic_->PowerOff();

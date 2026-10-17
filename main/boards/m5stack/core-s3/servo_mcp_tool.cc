@@ -47,7 +47,7 @@ void ServoMcpTool::Initialize() {
 
     mcp_server.AddTool(
         "self.robot.get_head_angles",
-        "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(3 to 87, 3=lowest/低头, 87=highest/抬头).",
+        "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(3 to 87, 3=低头/平视/初始位置, 87=抬头最高).",
         PropertyList(),
         [this](const PropertyList& properties) -> ToolResult {
             (void)properties;
@@ -60,7 +60,7 @@ void ServoMcpTool::Initialize() {
 
     mcp_server.AddTool(
         "self.robot.set_head_angles",
-        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(3 to 87, 3=lowest/低头, 87=highest/抬头. Smaller pitch = lower head, larger pitch = higher head. User says '低头'→use small value near 3, says '抬头'→use large value near 87), speed(100-1000, default 300 for smoother motion; 500=official baseline). Pass -9999 to leave an axis unchanged.",
+        "Move head to target angles. yaw(-128 to 128, negative=左转/your left, positive=右转/your right, 0=正中). pitch(3 to 87). PITCH ANCHORS (always use absolute values, never relative): 3=低头/平视/回正/初始位置/回到原位(lowest & default resting position, matches official StackChan), 87=抬头(highest). Smaller pitch = lower head, larger pitch = higher head. User says '低头' or '回正' or '平视' or '初始位置' or '回到原位'→set pitch=3; says '抬头'→set pitch=87. speed(100-1000, default 300). Pass -9999 to leave an axis unchanged.",
         PropertyList({
             Property("yaw", kPropertyTypeInteger, -9999, -9999, 128),
             Property("pitch", kPropertyTypeInteger, -9999, -9999, 87),
