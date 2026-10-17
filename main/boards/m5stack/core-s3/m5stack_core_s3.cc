@@ -123,7 +123,17 @@ private:
 // Reference: M5Stack official hal_io_expander.cpp + PY32IOExpander_Class driver
 class Py32L020 : public I2cDevice {
 public:
-    Py32L020(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr), addr_(addr) {}
+    Py32L020(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr), addr_(addr) {
+        // Base class creates device at 400kHz. PY32L020 official spec is 100kHz.
+        // Re-add at 100kHz to match official hal_io_expander.cpp and avoid data corruption.
+        i2c_master_del_device(i2c_device_);
+        i2c_device_config_t cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = addr,
+            .scl_speed_hz = 100 * 1000,
+        };
+        i2c_master_bus_add_device(i2c_bus, &cfg, &i2c_device_);
+    }
 
     // Safe Begin: caller must probe via i2c_master_probe first.
     // I2cDevice::ReadReg uses ESP_ERROR_CHECK and would crash on missing device.
@@ -318,7 +328,7 @@ private:
         // PY32L020 default addr = 0x6F (ADD_SEL low); alt = 0x71 (ADD_SEL high).
         uint8_t addrs[] = {0x6F, 0x71};
         uint8_t found = 0;
-        for (int retry = 0; retry < 5 && found == 0; retry++) {
+        for (int retry = 0; retry < 6 && found == 0; retry++) {  // 6x200ms=1200ms, match official timeout
             for (uint8_t a : addrs) {
                 if (i2c_master_probe(i2c_bus_, a, pdMS_TO_TICKS(100)) == ESP_OK) {
                     found = a;
