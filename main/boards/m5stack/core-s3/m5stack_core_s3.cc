@@ -123,16 +123,12 @@ private:
 // Reference: M5Stack official hal_io_expander.cpp + PY32IOExpander_Class driver
 class Py32L020 : public I2cDevice {
 public:
-    Py32L020(i2c_master_bus_handle_t i2c_bus, uint8_t addr = 0x6F) : I2cDevice(i2c_bus, addr) {}
+    Py32L020(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr), addr_(addr) {}
 
-    // Returns true if device responds with a valid version
+    // Safe Begin: caller must probe via i2c_master_probe first.
+    // I2cDevice::ReadReg uses ESP_ERROR_CHECK and would crash on missing device.
     bool Begin() {
-        uint8_t version = ReadReg(0x02);  // REG_VERSION
-        if (version == 0 || version == 0xFF) {
-            ESP_LOGE(TAG, "PY32L020 not found (version=0x%02X)", version);
-            return false;
-        }
-        ESP_LOGI(TAG, "PY32L020 found, version=0x%02X", version);
+        ESP_LOGI(TAG, "PY32L020 initialized at 0x%02X", addr_);
         return true;
     }
 
@@ -226,6 +222,9 @@ public:
         ShowAllLeds(0, 0, 0);  // all off by default
         ESP_LOGI(TAG, "PY32L020 LED strip (12x WS2812 on pin13) initialized");
     }
+
+private:
+    uint8_t addr_;
 };
 
 class M5StackCoreS3Board : public WifiBoard {
@@ -313,26 +312,31 @@ private:
     }
 
     void InitializePy32L020() {
-        ESP_LOGI(TAG, "Init PY32L020 (StackChan body IO expander)");
-        py32_ = new Py32L020(i2c_bus_, 0x6F);
-        // PY32L020 may boot slowly, retry a few times
-        bool found = false;
-        for (int i = 0; i < 5; i++) {
-            if (py32_->Begin()) {
-                found = true;
-                break;
+        ESP_LOGI(TAG, "Init PY32L020");
+        py32_ = nullptr;
+        // Probe FIRST — I2cDevice::ReadReg uses ESP_ERROR_CHECK and would crash on missing device.
+        // PY32L020 default addr = 0x6F (ADD_SEL low); alt = 0x71 (ADD_SEL high).
+        uint8_t addrs[] = {0x6F, 0x71};
+        uint8_t found = 0;
+        for (int retry = 0; retry < 5 && found == 0; retry++) {
+            for (uint8_t a : addrs) {
+                if (i2c_master_probe(i2c_bus_, a, pdMS_TO_TICKS(100)) == ESP_OK) {
+                    found = a;
+                    ESP_LOGI(TAG, "PY32L020 probed at 0x%02X (retry %d)", a, retry);
+                    break;
+                }
             }
-            vTaskDelay(pdMS_TO_TICKS(200));
+            if (found == 0) vTaskDelay(pdMS_TO_TICKS(200));
         }
-        if (found) {
-            // Enable servo power (VM_EN on pin 0) BEFORE servo init
-            py32_->EnableServoPower(true);
-            vTaskDelay(pdMS_TO_TICKS(200));
-            // Initialize RGB LED strip (12x WS2812 on pin 13)
-            py32_->InitLedStrip();
-        } else {
-            ESP_LOGW(TAG, "PY32L020 not found, servos will have no power and LEDs unavailable!");
+        if (found == 0) {
+            ESP_LOGW(TAG, "PY32L020 not found at 0x6F or 0x71 — servos unpowered, LEDs off");
+            return;
         }
+        py32_ = new Py32L020(i2c_bus_, found);
+        py32_->Begin();
+        py32_->EnableServoPower(true);
+        vTaskDelay(pdMS_TO_TICKS(200));
+        py32_->InitLedStrip();
     }
 
     void RegisterLedMcpTool() {
