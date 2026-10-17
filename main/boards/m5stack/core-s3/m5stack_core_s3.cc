@@ -145,16 +145,37 @@ public:
     }
 
     // Enable servo power (VM_EN on pin 0)
+    // Matches official setPullMode(): clear pull-down BEFORE set pull-up,
+    // otherwise both pull resistors fight and output level is undefined.
     void EnableServoPower(bool enable) {
+        // Set pin 0 as push-pull output (REG_GPIO_DRV_L = 0x13, bit0=0)
+        uint8_t drv = ReadReg(0x13);
+        drv &= ~0x01;  // 0 = push-pull
+        WriteReg(0x13, drv);
+
         // Set pin 0 as output (REG_GPIO_M_L = 0x03, bit0)
         uint8_t mode = ReadReg(0x03);
         if (enable) mode |= 0x01; else mode &= ~0x01;
         WriteReg(0x03, mode);
 
-        // Set pin 0 pull-up (REG_GPIO_PU_L = 0x09, bit0)
-        uint8_t pu = ReadReg(0x09);
-        if (enable) pu |= 0x01; else pu &= ~0x01;
-        WriteReg(0x09, pu);
+        if (enable) {
+            // Clear pull-down first (REG_GPIO_PD_L = 0x0B, bit0)
+            uint8_t pd = ReadReg(0x0B);
+            pd &= ~0x01;
+            WriteReg(0x0B, pd);
+            // Then set pull-up (REG_GPIO_PU_L = 0x09, bit0)
+            uint8_t pu = ReadReg(0x09);
+            pu |= 0x01;
+            WriteReg(0x09, pu);
+        } else {
+            // Disable both pulls
+            uint8_t pu = ReadReg(0x09);
+            pu &= ~0x01;
+            WriteReg(0x09, pu);
+            uint8_t pd = ReadReg(0x0B);
+            pd &= ~0x01;
+            WriteReg(0x0B, pd);
+        }
 
         // Set pin 0 output level (REG_GPIO_O_L = 0x05, bit0)
         uint8_t out = ReadReg(0x05);
@@ -164,8 +185,11 @@ public:
         // Read-back verification: confirm registers actually took effect
         uint8_t rb_mode = ReadReg(0x03);
         uint8_t rb_pu = ReadReg(0x09);
+        uint8_t rb_pd = ReadReg(0x0B);
+        uint8_t rb_drv = ReadReg(0x13);
         uint8_t rb_out = ReadReg(0x05);
-        ESP_LOGI(TAG, "PY32 VM_EN readback: dir=0x%02X pu=0x%02X out=0x%02X (expect bit0 set)", rb_mode, rb_pu, rb_out);
+        ESP_LOGI(TAG, "PY32 VM_EN: dir=0x%02X pu=0x%02X pd=0x%02X drv=0x%02X out=0x%02X (expect bit0 in dir/out, bit0 in pu, bit0 clear in pd/drv)",
+                 rb_mode, rb_pu, rb_pd, rb_drv, rb_out);
         ESP_LOGI(TAG, "PY32L020 servo power (VM_EN pin0): %s", enable ? "ON" : "OFF");
     }
 
