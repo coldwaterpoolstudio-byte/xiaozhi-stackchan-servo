@@ -1,4 +1,6 @@
 #include "scservo.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "driver/gpio.h"
 #include <esp_log.h>
 #include <cstring>
@@ -15,6 +17,7 @@ static constexpr uint8_t kRegGoalTime = 0x2C;       // 2 bytes, big-endian; effe
 static constexpr uint8_t kRegGoalSpeed = 0x2E;      // 2 bytes, big-endian
 static constexpr uint8_t kRegTorqueEnable = 0x28;   // 1 byte
 static constexpr uint8_t kRegCurrentPosition = 0x38; // 2 bytes, big-endian, read-only
+static constexpr uint8_t kRegPresentLoad = 0x3C;    // 2 bytes, big-endian, read-only (bit15=direction, bits14-0=load)
 
 ScServo::ScServo(uart_port_t uart_num, gpio_num_t tx_pin, gpio_num_t rx_pin, int servo_id, int center_raw)
     : uart_num_(uart_num), tx_pin_(tx_pin), rx_pin_(rx_pin), servo_id_(servo_id), center_raw_(center_raw) {}
@@ -91,6 +94,16 @@ void ScServo::writeRegister(uint8_t reg, const uint8_t* data, size_t len) {
 }
 
 bool ScServo::readRegister(uint8_t reg, uint8_t* data, size_t len, int timeout_ms) {
+    // Retry up to 3 times (half-duplex bus can miss a response)
+    for (int attempt = 0; attempt < 3; attempt++) {
+        if (readRegisterInternal(reg, data, len, timeout_ms)) return true;
+        if (attempt < 2) vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    ESP_LOGW(TAG, "Servo %d readRegister 0x%02X failed after 3 retries", servo_id_, reg);
+    return false;
+}
+
+bool ScServo::readRegisterInternal(uint8_t reg, uint8_t* data, size_t len, int timeout_ms) {
     uint8_t packet[8];
     packet[0] = 0xFF;
     packet[1] = 0xFF;
@@ -155,6 +168,42 @@ void ScServo::move(int position_01deg) {
     moveWithSpeed(position_01deg, 500);
 }
 
+void ScServo::stallTaskFunc(void* arg) {
+    ScServo* servo = static_cast<ScServo*>(arg);
+    int target = servo->last_target_01deg_;
+    int target_raw = servo->angleToRaw(target);
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(1500);
+    int last_pos = -9999;
+    int stable_count = 0;
+    while (xTaskGetTickCount() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        int cur = servo->getCurrentAngle();
+        int cur_raw = servo->angleToRaw(cur);
+        if (abs(cur_raw - target_raw) < 15) {
+            servo->stall_task_ = nullptr;
+            vTaskDelete(nullptr);
+            return;
+        }
+        if (cur_raw == last_pos) {
+            stable_count++;
+            if (stable_count >= 8) {  // 400ms no movement = stalled
+                ESP_LOGW("ScServo", "Servo %d stalled! Releasing torque.", servo->servo_id_);
+                servo->setTorque(false);
+                vTaskDelay(pdMS_TO_TICKS(200));
+                servo->setTorque(true);
+                servo->stall_task_ = nullptr;
+                vTaskDelete(nullptr);
+                return;
+            }
+        } else {
+            stable_count = 0;
+        }
+        last_pos = cur_raw;
+    }
+    servo->stall_task_ = nullptr;
+    vTaskDelete(nullptr);
+}
+
 void ScServo::moveWithSpeed(int position_01deg, int speed_0_1000) {
     int raw_pos = angleToRaw(position_01deg);
     ESP_LOGI(TAG, "Servo %d move: angle=%d raw=%d speed=%d", servo_id_, position_01deg, raw_pos, speed_0_1000);
@@ -166,13 +215,24 @@ void ScServo::moveWithSpeed(int position_01deg, int speed_0_1000) {
     // Goal Position (BIG-ENDIAN: high byte first, matches official SCSCL End=1 Host2SCS)
     data[0] = (uint8_t)((raw_pos >> 8) & 0xFF);
     data[1] = (uint8_t)(raw_pos & 0xFF);
-    // Goal Time = 20 (big-endian; matches official StackChan WritePos Time=20)
-    data[2] = 0x00;
-    data[3] = 20;
-    // Goal Speed = 0 (big-endian; matches official StackChan WritePos Speed=0)
+    // Goal Time = 10000/speed (unit=10ms). speed=500 -> Time=20 (official baseline).
+    // speed=300 (default, smoother) -> Time=33 (330ms). speed=100 -> Time=100 (1s, very slow).
+    int goal_time = 10000 / (speed_0_1000 > 0 ? speed_0_1000 : 1);
+    if (goal_time < 5) goal_time = 5;      // min 50ms
+    if (goal_time > 200) goal_time = 200;   // max 2000ms
+    data[2] = (uint8_t)((goal_time >> 8) & 0xFF);
+    data[3] = (uint8_t)(goal_time & 0xFF);
+    // Goal Speed = 0 (big-endian; matches official StackChan WritePos Speed=0 = max speed, Time controls duration)
     data[4] = 0x00;
     data[5] = 0x00;
     writeRegister(kRegGoalPosition, data, 6);
+
+    // Async stall protection: start one-shot task (does not block main thread)
+    last_target_01deg_ = position_01deg;
+    if (stall_task_ != nullptr) {
+        vTaskDelete(stall_task_);  // cancel previous stale task
+    }
+    xTaskCreate(stallTaskFunc, "servo_stall", 2048, this, 5, &stall_task_);
 }
 
 int ScServo::getCurrentAngle() {
@@ -183,6 +243,48 @@ int ScServo::getCurrentAngle() {
     // SCS series: BIG-ENDIAN (high byte first, matches official SCSCL End=1)
     int raw = (data[0] << 8) | data[1];
     return rawToAngle(raw);
+}
+
+int ScServo::readLoad() {
+    uint8_t data[2] = {0, 0};
+    if (!readRegister(kRegPresentLoad, data, 2)) {
+        return -1;
+    }
+    int raw = (data[0] << 8) | data[1];
+    // bit15 = direction (0=CCW, 1=CW), bits14-0 = load value
+    int load = raw & 0x7FFF;
+    if (raw & 0x8000) load = -load;
+    return load;
+}
+
+bool ScServo::stallProtect(int target_angle_01deg, int timeout_ms) {
+    // Wait for servo to reach target, release torque if stalled
+    int target_raw = angleToRaw(target_angle_01deg);
+    TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    int last_pos = -9999;
+    int stable_count = 0;
+    while (xTaskGetTickCount() < deadline) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+        int cur = getCurrentAngle();
+        int cur_raw = angleToRaw(cur);
+        if (abs(cur_raw - target_raw) < 10) {
+            return true;  // reached target
+        }
+        if (cur_raw == last_pos) {
+            stable_count++;
+            if (stable_count >= 6) {  // 300ms no movement = stalled
+                ESP_LOGW(TAG, "Servo %d stalled! Releasing torque.", servo_id_);
+                setTorque(false);
+                vTaskDelay(pdMS_TO_TICKS(100));
+                setTorque(true);
+                return false;
+            }
+        } else {
+            stable_count = 0;
+        }
+        last_pos = cur_raw;
+    }
+    return false;  // timeout
 }
 
 void ScServo::setTorque(bool enabled) {

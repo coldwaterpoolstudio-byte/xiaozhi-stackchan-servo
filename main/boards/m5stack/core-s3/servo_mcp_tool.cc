@@ -29,16 +29,16 @@ void ServoMcpTool::Initialize() {
     // (matches official StackChan boot behavior)
     ESP_LOGI(TAG, "Servo self-test: yaw sweep");
     vTaskDelay(pdMS_TO_TICKS(200));
-    yaw_servo_->moveWithSpeed(-300, 0);  // yaw left 30 deg
+    yaw_servo_->moveWithSpeed(-300, 250);  // yaw left 30 deg (Time=40, 50% slower)
     vTaskDelay(pdMS_TO_TICKS(500));
-    yaw_servo_->moveWithSpeed(300, 0);   // yaw right 30 deg
+    yaw_servo_->moveWithSpeed(300, 250);   // yaw right 30 deg (Time=40, 50% slower)
     vTaskDelay(pdMS_TO_TICKS(500));
-    yaw_servo_->moveWithSpeed(0, 0);     // yaw center
+    yaw_servo_->moveWithSpeed(0, 250);     // yaw center (Time=40, 50% slower)
     vTaskDelay(pdMS_TO_TICKS(300));
     ESP_LOGI(TAG, "Servo self-test: pitch up");
-    pitch_servo_->moveWithSpeed(300, 0); // pitch up 30 deg
+    pitch_servo_->moveWithSpeed(300, 250); // pitch up 30 deg (Time=40, 50% slower)
     vTaskDelay(pdMS_TO_TICKS(500));
-    pitch_servo_->moveWithSpeed(0, 0);   // pitch center
+    pitch_servo_->moveWithSpeed(0, 250);   // pitch center (Time=40, 50% slower)
     vTaskDelay(pdMS_TO_TICKS(300));
     ESP_LOGI(TAG, "Servo self-test complete");
 
@@ -60,11 +60,11 @@ void ServoMcpTool::Initialize() {
 
     mcp_server.AddTool(
         "self.robot.set_head_angles",
-        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(3 to 87, 87=up, hardware cannot look down), speed(100-1000, default 150). Pass -9999 to leave an axis unchanged.",
+        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(3 to 87, 87=up, hardware cannot look down), speed(100-1000, default 300 for smoother motion; 500=official baseline). Pass -9999 to leave an axis unchanged.",
         PropertyList({
             Property("yaw", kPropertyTypeInteger, -9999, -9999, 128),
             Property("pitch", kPropertyTypeInteger, -9999, -9999, 87),
-            Property("speed", kPropertyTypeInteger, 150, 100, 1000),
+            Property("speed", kPropertyTypeInteger, 300, 100, 1000),
         }),
         [this](const PropertyList& properties) -> ToolResult {
             int yaw = properties["yaw"].value<int>();

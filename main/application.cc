@@ -751,7 +751,9 @@ void Application::ShowActivationCode(const std::string& code, const std::string&
          digit_sound{'8', Lang::Sounds::OGG_8}, digit_sound{'9', Lang::Sounds::OGG_9}}};
 
     // This sentence uses 9KB of SRAM, so we need to wait for it to finish
-    Alert(Lang::Strings::ACTIVATION, message.c_str(), "link", Lang::Sounds::OGG_ACTIVATION);
+    // Show activation code digits on screen (in addition to voice announcement)
+    std::string display_msg = message + "  Code: " + code;
+    Alert(Lang::Strings::ACTIVATION, display_msg.c_str(), "link", Lang::Sounds::OGG_ACTIVATION);
 
     for (const auto& digit : code) {
         auto it = std::find_if(digit_sounds.begin(), digit_sounds.end(),
