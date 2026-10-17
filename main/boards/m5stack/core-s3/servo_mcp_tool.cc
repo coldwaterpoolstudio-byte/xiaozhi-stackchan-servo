@@ -38,7 +38,7 @@ void ServoMcpTool::Initialize() {
     ESP_LOGI(TAG, "Servo self-test: pitch up");
     pitch_servo_->moveWithSpeed(300, 250); // pitch up 30 deg (Time=40, 50% slower)
     vTaskDelay(pdMS_TO_TICKS(500));
-    pitch_servo_->moveWithSpeed(0, 250);   // pitch center (Time=40, 50% slower)
+    pitch_servo_->moveWithSpeed(30, 250);  // pitch center/lowest (3 deg, matches official limit)
     vTaskDelay(pdMS_TO_TICKS(300));
     ESP_LOGI(TAG, "Servo self-test complete");
 
@@ -47,7 +47,7 @@ void ServoMcpTool::Initialize() {
 
     mcp_server.AddTool(
         "self.robot.get_head_angles",
-        "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(0 to 87, 87=up, 0=lowest safe).",
+        "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(3 to 87, 3=lowest/低头, 87=highest/抬头).",
         PropertyList(),
         [this](const PropertyList& properties) -> ToolResult {
             (void)properties;
@@ -60,7 +60,7 @@ void ServoMcpTool::Initialize() {
 
     mcp_server.AddTool(
         "self.robot.set_head_angles",
-        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(0 to 87, 87=up, 0=lowest safe), speed(100-1000, default 300 for smoother motion; 500=official baseline). Pass -9999 to leave an axis unchanged.",
+        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(3 to 87, 3=lowest/低头, 87=highest/抬头. Smaller pitch = lower head, larger pitch = higher head. User says '低头'→use small value near 3, says '抬头'→use large value near 87), speed(100-1000, default 300 for smoother motion; 500=official baseline). Pass -9999 to leave an axis unchanged.",
         PropertyList({
             Property("yaw", kPropertyTypeInteger, -9999, -9999, 128),
             Property("pitch", kPropertyTypeInteger, -9999, -9999, 87),
@@ -77,8 +77,9 @@ void ServoMcpTool::Initialize() {
                 yaw_servo_->moveWithSpeed(yaw * 10, speed);
             }
             if (pitch != -9999 && pitch_servo_) {
-                // Pitch limit: 0~87 degrees (0=lowest safe, 87=up, default=center)
-                if (pitch < 0) pitch = 0;
+                // Pitch limit: 3~87 degrees (official StackChan safe range)
+                // 3=lowest (低头), 87=highest (抬头)
+                if (pitch < 3) pitch = 3;
                 if (pitch > 87) pitch = 87;
                 pitch_servo_->moveWithSpeed(pitch * 10, speed);
             }

@@ -31,8 +31,11 @@ private:
     int servo_id_;
     int center_raw_;
     int last_target_01deg_ = 0;       // last target for stall detection
+    bool torque_enabled_ = true;      // track current torque state
     TaskHandle_t stall_task_ = nullptr; // async stall protection task
+    TaskHandle_t auto_release_task_ = nullptr; // auto torque release after 200ms idle
     static void stallTaskFunc(void* arg);
+    static void autoReleaseTaskFunc(void* arg);
 
     static constexpr float kRawPer01Deg = 16.0f / 5.0f / 10.0f;  // 0.32, official StackChan
     static constexpr int kRawMin = 0;
