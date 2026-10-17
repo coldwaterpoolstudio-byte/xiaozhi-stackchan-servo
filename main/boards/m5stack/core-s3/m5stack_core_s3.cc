@@ -131,6 +131,8 @@ public:
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = addr,
             .scl_speed_hz = 100 * 1000,
+            .scl_wait_us = 50000,
+            .flags = {.disable_ack_check = 0},
         };
         i2c_master_bus_add_device(i2c_bus, &cfg, &i2c_device_);
     }
@@ -159,6 +161,11 @@ public:
         if (enable) out |= 0x01; else out &= ~0x01;
         WriteReg(0x05, out);
 
+        // Read-back verification: confirm registers actually took effect
+        uint8_t rb_mode = ReadReg(0x03);
+        uint8_t rb_pu = ReadReg(0x09);
+        uint8_t rb_out = ReadReg(0x05);
+        ESP_LOGI(TAG, "PY32 VM_EN readback: dir=0x%02X pu=0x%02X out=0x%02X (expect bit0 set)", rb_mode, rb_pu, rb_out);
         ESP_LOGI(TAG, "PY32L020 servo power (VM_EN pin0): %s", enable ? "ON" : "OFF");
     }
 
