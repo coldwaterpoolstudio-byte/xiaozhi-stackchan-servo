@@ -9,12 +9,12 @@ static const char* TAG = "ScServo";
 static constexpr uint8_t kScsInstWrite = 0x03;
 static constexpr uint8_t kScsInstRead = 0x02;
 
-// SCS0009 registers (SCS series: big-endian, high byte first)
-static constexpr uint8_t kRegGoalPosition = 0x2A;  // 2 bytes, big-endian
-static constexpr uint8_t kRegGoalTime = 0x2C;       // 2 bytes, big-endian; effective when speed=0
-static constexpr uint8_t kRegGoalSpeed = 0x2E;      // 2 bytes, big-endian
+// SCS0009 registers (SCS series: LITTLE-ENDIAN, low byte first)
+static constexpr uint8_t kRegGoalPosition = 0x2A;  // 2 bytes, little-endian
+static constexpr uint8_t kRegGoalTime = 0x2C;       // 2 bytes, little-endian; effective when speed=0
+static constexpr uint8_t kRegGoalSpeed = 0x2E;      // 2 bytes, little-endian
 static constexpr uint8_t kRegTorqueEnable = 0x28;   // 1 byte
-static constexpr uint8_t kRegCurrentPosition = 0x38; // 2 bytes, big-endian, read-only
+static constexpr uint8_t kRegCurrentPosition = 0x38; // 2 bytes, little-endian, read-only
 
 ScServo::ScServo(uart_port_t uart_num, gpio_num_t tx_pin, gpio_num_t rx_pin, int servo_id, int center_raw)
     : uart_num_(uart_num), tx_pin_(tx_pin), rx_pin_(rx_pin), servo_id_(servo_id), center_raw_(center_raw) {}
@@ -37,7 +37,7 @@ void ScServo::init() {
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+        .source_clk = UART_SCLK_APB,
     };
     esp_err_t ret = uart_param_config(uart_num_, &config);
     ESP_LOGI(TAG, "uart_param_config ret=%d", ret);
@@ -46,6 +46,8 @@ void ScServo::init() {
     // Keep TX as UART output for write operations (servo does not reply to WRITE).
     // Only release TX during READ operations.
     ESP_LOGI(TAG, "Servo %d initialized on UART%d (tx=%d rx=%d)", servo_id_, uart_num_, tx_pin_, rx_pin_);
+    // Ensure servo is in position mode (factory firmware may leave yaw in motor/PWM mode)
+    ensurePositionMode();
 }
 
 uint8_t ScServo::checksum(const uint8_t* data, size_t len) {
@@ -63,11 +65,15 @@ void ScServo::sendPacket(const uint8_t* data, size_t len) {
     uart_flush_input(uart_num_);
     int written = uart_write_bytes(uart_num_, data, len);
     uart_wait_tx_done(uart_num_, pdMS_TO_TICKS(50));
+    // Always log: confirm data actually went out on the wire
+    char hexbuf[64];
+    int pos = 0;
+    for (size_t i = 0; i < len && pos < (int)sizeof(hexbuf) - 4; i++) {
+        pos += snprintf(hexbuf + pos, sizeof(hexbuf) - pos, "%02X ", data[i]);
+    }
+    ESP_LOGI(TAG, "TX servo=%d len=%d wrote=%d: %s", servo_id_, len, written, hexbuf);
     // Small delay for servo to process the command
     vTaskDelay(pdMS_TO_TICKS(3));
-    if (written != (int)len) {
-        ESP_LOGW(TAG, "sendPacket: wrote %d/%d bytes for servo %d", written, len, servo_id_);
-    }
 }
 
 void ScServo::writeRegister(uint8_t reg, const uint8_t* data, size_t len) {
@@ -157,14 +163,13 @@ void ScServo::moveWithSpeed(int position_01deg, int speed_0_1000) {
     // Writing them as separate register writes can leave servo at default speed=0 (stopped).
     // Reference: Qiita Ninagawa123 SCS0009 direct drive example.
     uint8_t data[6];
-    // Goal Position (big-endian)
-    data[0] = (uint8_t)((raw_pos >> 8) & 0xFF);
-    data[1] = (uint8_t)(raw_pos & 0xFF);
-    // Goal Time = 20 (matches official StackChan WritePos Time=20)
-    // When speed=0, Operating Time takes effect; official uses Time=20.
-    data[2] = 0x00;
-    data[3] = 20;
-    // Goal Speed = 0 (matches official StackChan WritePos Speed=0)
+    // Goal Position (LITTLE-ENDIAN: low byte first, per Feetech protocol manual Example 4)
+    data[0] = (uint8_t)(raw_pos & 0xFF);
+    data[1] = (uint8_t)((raw_pos >> 8) & 0xFF);
+    // Goal Time = 20 (little-endian; matches official StackChan WritePos Time=20)
+    data[2] = 20;
+    data[3] = 0x00;
+    // Goal Speed = 0 (little-endian; matches official StackChan WritePos Speed=0)
     data[4] = 0x00;
     data[5] = 0x00;
     writeRegister(kRegGoalPosition, data, 6);
@@ -175,12 +180,42 @@ int ScServo::getCurrentAngle() {
     if (!readRegister(kRegCurrentPosition, data, 2)) {
         return 0;
     }
-    // SCS series: big-endian (high byte first)
-    int raw = (data[0] << 8) | data[1];
+    // SCS series: LITTLE-ENDIAN (low byte first)
+    int raw = data[0] | (data[1] << 8);
     return rawToAngle(raw);
 }
 
 void ScServo::setTorque(bool enabled) {
     uint8_t data[1] = {(uint8_t)(enabled ? 1 : 0)};
     writeRegister(kRegTorqueEnable, data, 1);
+}
+
+void ScServo::ensurePositionMode() {
+    // SCS0009 enters motor mode when BOTH angle limits are set to 0.
+    // Factory firmware enables PWM mode on yaw; ensure we restore position mode.
+    // EEPROM area (0x09-0x0C) uses BIG-ENDIAN (H byte first), unlike SRAM area.
+    // EEPROM write requires unlock (reg 0x30=0), then lock (0x30=1) after.
+    ESP_LOGI(TAG, "Servo %d ensuring position mode...", servo_id_);
+
+    // Unlock EEPROM
+    uint8_t unlock = 0;
+    writeRegister(0x30, &unlock, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Min angle limit = 0 (addr 0x09, big-endian H=0x00 L=0x00)
+    uint8_t min_limit[2] = {0x00, 0x00};
+    writeRegister(0x09, min_limit, 2);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Max angle limit = 1023 = 0x03FF (addr 0x0B, big-endian H=0x03 L=0xFF)
+    uint8_t max_limit[2] = {0x03, 0xFF};
+    writeRegister(0x0B, max_limit, 2);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // Lock EEPROM
+    uint8_t lock = 1;
+    writeRegister(0x30, &lock, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    ESP_LOGI(TAG, "Servo %d position mode ensured (angle limit 0~1023)", servo_id_);
 }

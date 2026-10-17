@@ -26,6 +26,10 @@ bool Axp2101::IsChargingDone() {
     return (value & 0b00000111) == 0b00000100;
 }
 
+bool Axp2101::IsVbusPresent() {
+    return (ReadReg(0x00) & 0b01000000) != 0;
+}
+
 int Axp2101::GetBatteryLevel() {
     return ReadReg(0xA4);
 }

@@ -140,6 +140,10 @@ private:
             GetBacklight()->RestoreBrightness();
         });
         power_save_timer_->OnShutdownRequest([this]() {
+            if (pmic_->IsVbusPresent()) {
+                ESP_LOGI(TAG, "VBUS present, skip power off (stay in sleep mode)");
+                return;
+            }
             pmic_->PowerOff();
         });
         power_save_timer_->SetEnabled(true);
@@ -374,14 +378,12 @@ public:
     }
 
     virtual bool GetBatteryLevel(int &level, bool& charging, bool& discharging) override {
-        static bool last_discharging = false;
         charging = pmic_->IsCharging();
         discharging = pmic_->IsDischarging();
-        if (discharging != last_discharging) {
-            power_save_timer_->SetEnabled(discharging);
-            last_discharging = discharging;
-        }
-
+        // Keep power-save timer enabled on both USB and battery:
+        // USB supply still gets 120s screen dimming; shutdown is gated by
+        // the VBUS check in OnShutdownRequest so it won't power-cycle.
+        power_save_timer_->SetEnabled(true);
         level = pmic_->GetBatteryLevel();
         return true;
     }

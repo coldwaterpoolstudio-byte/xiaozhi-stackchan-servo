@@ -6,8 +6,8 @@
 
 // Lightweight Feetech SCS0009 serial bus servo driver.
 // Protocol matches official M5Stack StackChan hal_servo.cpp (SCSCL library):
-//   - UART1, 1Mbps, GPIO6 TX / GPIO7 RX
-//   - big-endian (high byte first), SCS series
+//   - UART1, 1Mbps, GPIO7 TX / GPIO6 RX
+//   - little-endian (low byte first), SCS series
 //   - raw range 0~1000, 0.32 raw per 0.1 degree (16/5/10)
 //   - yaw center=460, pitch center=620
 class ScServo {
@@ -20,6 +20,7 @@ public:
     void moveWithSpeed(int position_01deg, int speed_0_1000);
     int getCurrentAngle();
     void setTorque(bool enabled);
+    void ensurePositionMode();
 
 private:
     uart_port_t uart_num_;

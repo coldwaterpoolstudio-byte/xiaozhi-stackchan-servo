@@ -9,6 +9,7 @@ public:
     bool IsCharging();
     bool IsDischarging();
     bool IsChargingDone();
+    bool IsVbusPresent();
     int GetBatteryLevel();
     float GetTemperature();
     void PowerOff();
