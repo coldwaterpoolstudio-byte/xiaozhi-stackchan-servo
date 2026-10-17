@@ -126,7 +126,7 @@ public:
     Py32L020(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : I2cDevice(i2c_bus, addr), addr_(addr) {
         // Base class creates device at 400kHz. PY32L020 official spec is 100kHz.
         // Re-add at 100kHz to match official hal_io_expander.cpp and avoid data corruption.
-        i2c_master_del_device(i2c_device_);
+        i2c_master_bus_rm_device(i2c_device_);
         i2c_device_config_t cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = addr,
