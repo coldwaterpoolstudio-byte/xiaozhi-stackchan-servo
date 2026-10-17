@@ -7,6 +7,7 @@
 #include "i2c_device.h"
 #include "axp2101.h"
 #include "servo_mcp_tool.h"
+#include "mcp_server.h"
 
 #include <esp_log.h>
 #include <driver/i2c_master.h>
@@ -117,11 +118,122 @@ private:
     TouchPoint_t tp_;
 };
 
+// PY32L020 IO expander on StackChan body: controls servo power (pin 0 = VM_EN)
+// and RGB LED strip (pin 13). I2C addr 0x6F, 100kHz.
+// Reference: M5Stack official hal_io_expander.cpp + PY32IOExpander_Class driver
+class Py32L020 : public I2cDevice {
+public:
+    Py32L020(i2c_master_bus_handle_t i2c_bus, uint8_t addr = 0x6F) : I2cDevice(i2c_bus, addr) {}
+
+    // Returns true if device responds with a valid version
+    bool Begin() {
+        uint8_t version = ReadReg(0x02);  // REG_VERSION
+        if (version == 0 || version == 0xFF) {
+            ESP_LOGE(TAG, "PY32L020 not found (version=0x%02X)", version);
+            return false;
+        }
+        ESP_LOGI(TAG, "PY32L020 found, version=0x%02X", version);
+        return true;
+    }
+
+    // Enable servo power (VM_EN on pin 0)
+    void EnableServoPower(bool enable) {
+        // Set pin 0 as output (REG_GPIO_M_L = 0x03, bit0)
+        uint8_t mode = ReadReg(0x03);
+        if (enable) mode |= 0x01; else mode &= ~0x01;
+        WriteReg(0x03, mode);
+
+        // Set pin 0 pull-up (REG_GPIO_PU_L = 0x09, bit0)
+        uint8_t pu = ReadReg(0x09);
+        if (enable) pu |= 0x01; else pu &= ~0x01;
+        WriteReg(0x09, pu);
+
+        // Set pin 0 output level (REG_GPIO_O_L = 0x05, bit0)
+        uint8_t out = ReadReg(0x05);
+        if (enable) out |= 0x01; else out &= ~0x01;
+        WriteReg(0x05, out);
+
+        ESP_LOGI(TAG, "PY32L020 servo power (VM_EN pin0): %s", enable ? "ON" : "OFF");
+    }
+
+    // === RGB LED strip control (12x WS2812C on pin 13) ===
+    // PY32 generates WS2812 timing internally; ESP32 only sends color data via I2C.
+    void SetLedCount(uint8_t count) {
+        if (count > 32) count = 32;
+        WriteReg(0x24, count & 0x3F);  // REG_LED_CFG
+    }
+
+    // Primary: RGB888 input (r,g,b each 0-255)
+    void SetLedColor(uint8_t index, uint8_t r, uint8_t g, uint8_t b) {
+        if (index >= 32) return;
+        uint16_t color565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        uint8_t data[2] = {(uint8_t)(color565 & 0xFF), (uint8_t)((color565 >> 8) & 0xFF)};
+        WriteRegs(0x30 + index * 2, data, 2);  // REG_LED_RAM_START
+    }
+
+    // Overload: accept pre-converted RGB565 (e.g. read directly from display framebuffer)
+    void SetLedColor(uint8_t index, uint16_t color565) {
+        if (index >= 32) return;
+        uint8_t data[2] = {(uint8_t)(color565 & 0xFF), (uint8_t)((color565 >> 8) & 0xFF)};
+        WriteRegs(0x30 + index * 2, data, 2);
+    }
+
+    // Overload: accept 0xRRGGBB packed integer (web color format)
+    void SetLedColor(uint8_t index, uint32_t color) {
+        SetLedColor(index,
+                    (uint8_t)((color >> 16) & 0xFF),
+                    (uint8_t)((color >> 8) & 0xFF),
+                    (uint8_t)(color & 0xFF));
+    }
+
+    // Bulk write: raw RGB565 pairs for all LEDs in a single I2C transaction.
+    // data = 2 bytes per LED (little-endian RGB565), len = count*2.
+    // Much faster than per-LED writes when animating (breathing/rainbow/etc).
+    void SetLedData(const uint8_t* data, size_t len) {
+        if (!data || len == 0) return;
+        if (len > 64) len = 64;  // max 32 LEDs * 2 bytes
+        WriteRegs(0x30, data, len);  // REG_LED_RAM_START
+    }
+
+    void RefreshLeds() {
+        uint8_t val = ReadReg(0x24);
+        WriteReg(0x24, val | (1 << 6));  // trigger refresh bit
+    }
+
+    void ShowAllLeds(uint8_t r, uint8_t g, uint8_t b) {
+        for (int i = 0; i < 12; i++) {
+            SetLedColor(i, r, g, b);
+        }
+        RefreshLeds();
+    }
+
+    void InitLedStrip() {
+        // Pin 13 = RGB data output (in high byte registers: bit 5)
+        uint8_t mode_h = ReadReg(0x04);   // GPIO_M_H
+        mode_h |= 0x20;                    // pin13 output
+        WriteReg(0x04, mode_h);
+
+        uint8_t pu_h = ReadReg(0x0A);     // GPIO_PU_H
+        pu_h |= 0x20;                      // pin13 pull-up
+        WriteReg(0x0A, pu_h);
+
+        uint8_t drv_h = ReadReg(0x14);    // GPIO_DRV_H
+        drv_h &= ~0x20;                    // pin13 push-pull (0=push-pull)
+        WriteReg(0x14, drv_h);
+
+        SetLedCount(12);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        ShowAllLeds(0, 0, 0);  // all off by default
+        ESP_LOGI(TAG, "PY32L020 LED strip (12x WS2812 on pin13) initialized");
+    }
+};
+
 class M5StackCoreS3Board : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
     Pmic* pmic_;
     Aw9523* aw9523_;
+    Py32L020* py32_;
     Ft6336* ft6336_;
     LcdDisplay* display_;
     EspVideo* camera_;
@@ -198,6 +310,62 @@ private:
         // Constructor sets: 0x02=0x07(BUS_OUT_EN=P0_1 high), 0x03=0x8F(BOOST_EN=P1_7 high),
         // 0x04=0x18, 0x05=0x0C, 0x11=0x10(P0 push-pull). Base 5V is enabled by default.
         vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    void InitializePy32L020() {
+        ESP_LOGI(TAG, "Init PY32L020 (StackChan body IO expander)");
+        py32_ = new Py32L020(i2c_bus_, 0x6F);
+        // PY32L020 may boot slowly, retry a few times
+        bool found = false;
+        for (int i = 0; i < 5; i++) {
+            if (py32_->Begin()) {
+                found = true;
+                break;
+            }
+            vTaskDelay(pdMS_TO_TICKS(200));
+        }
+        if (found) {
+            // Enable servo power (VM_EN on pin 0) BEFORE servo init
+            py32_->EnableServoPower(true);
+            vTaskDelay(pdMS_TO_TICKS(200));
+            // Initialize RGB LED strip (12x WS2812 on pin 13)
+            py32_->InitLedStrip();
+        } else {
+            ESP_LOGW(TAG, "PY32L020 not found, servos will have no power and LEDs unavailable!");
+        }
+    }
+
+    void RegisterLedMcpTool() {
+        if (!py32_) return;
+        auto& mcp_server = McpServer::GetInstance();
+        mcp_server.AddTool(
+            "self.robot.set_led",
+            "Set one of the 12 base RGB LEDs by index (0..11). Channels 0..255. Updates immediately. Use for visual feedback: green when listening, blue when thinking, red on error, warm white during conversation. index=99 means all LEDs.",
+            PropertyList({
+                Property("index", kPropertyTypeInteger, 0, 0, 99),
+                Property("r", kPropertyTypeInteger, 0, 0, 255),
+                Property("g", kPropertyTypeInteger, 0, 0, 255),
+                Property("b", kPropertyTypeInteger, 0, 0, 255),
+            }),
+            [this](const PropertyList& properties) -> ToolResult {
+                int index = properties["index"].value<int>();
+                int r = properties["r"].value<int>();
+                int g = properties["g"].value<int>();
+                int b = properties["b"].value<int>();
+                if (!py32_) {
+                    return ReturnValue(std::string("{\"error\": \"PY32 not initialized\"}"));
+                }
+                if (index == 99) {
+                    py32_->ShowAllLeds(r, g, b);
+                } else if (index >= 0 && index < 12) {
+                    py32_->SetLedColor(index, r, g, b);
+                    py32_->RefreshLeds();
+                }
+                char buf[64];
+                snprintf(buf, sizeof(buf), "{\"index\": %d, \"rgb\": [%d,%d,%d]}", index, r, g, b);
+                return ReturnValue(std::string(buf));
+            });
+        ESP_LOGI(TAG, "LED MCP tool registered (self.robot.set_led)");
     }
 
     void PollTouchpad() {
@@ -343,6 +511,7 @@ public:
         InitializeI2c();
         InitializeAxp2101();
         InitializeAw9523();
+        InitializePy32L020();
         I2cDetect();
         InitializeSpi();
         InitializeIli9342Display();
@@ -351,6 +520,8 @@ public:
         // StackChan servo MCP: enable voice-controlled head movement via cloud AI
         servo_mcp_ = new ServoMcpTool();
         servo_mcp_->Initialize();
+        // LED MCP tool: voice-controlled RGB light strip
+        RegisterLedMcpTool();
         GetBacklight()->RestoreBrightness();
     }
 
