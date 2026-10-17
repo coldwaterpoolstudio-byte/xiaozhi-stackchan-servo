@@ -7,6 +7,7 @@
 #include "i2c_device.h"
 #include "axp2101.h"
 #include "servo_mcp_tool.h"
+#include "scservo.h"
 #include "mcp_server.h"
 
 #include <esp_log.h>
