@@ -47,7 +47,7 @@ void ServoMcpTool::Initialize() {
 
     mcp_server.AddTool(
         "self.robot.get_head_angles",
-        "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(3 to 87, 87=up, hardware cannot look down).",
+        "Returns current yaw/pitch in degrees. yaw(-128 to 128, negative=your left), pitch(0 to 87, 87=up, hardware cannot look down).",
         PropertyList(),
         [this](const PropertyList& properties) -> ToolResult {
             (void)properties;
@@ -60,7 +60,7 @@ void ServoMcpTool::Initialize() {
 
     mcp_server.AddTool(
         "self.robot.set_head_angles",
-        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(3 to 87, 87=up, hardware cannot look down), speed(100-1000, default 300 for smoother motion; 500=official baseline). Pass -9999 to leave an axis unchanged.",
+        "Move head to target angles. Use for natural conversation: small yaw shifts while listening, slight pitch up when thinking, return to center when idle. Extreme values only when user explicitly says 'look up/down/left/right'. yaw(-128 to 128, negative=your left), pitch(0 to 87, 87=up, hardware cannot look down), speed(100-1000, default 300 for smoother motion; 500=official baseline). Pass -9999 to leave an axis unchanged.",
         PropertyList({
             Property("yaw", kPropertyTypeInteger, -9999, -9999, 128),
             Property("pitch", kPropertyTypeInteger, -9999, -9999, 87),
@@ -77,8 +77,8 @@ void ServoMcpTool::Initialize() {
                 yaw_servo_->moveWithSpeed(yaw * 10, speed);
             }
             if (pitch != -9999 && pitch_servo_) {
-                // Official StackChan pitch limit: 3~87 degrees (hardware cannot look down)
-                if (pitch < 3) pitch = 3;
+                // Pitch limit: 0~87 degrees (0=lowest safe, 87=up, default=center)
+                if (pitch < 0) pitch = 0;
                 if (pitch > 87) pitch = 87;
                 pitch_servo_->moveWithSpeed(pitch * 10, speed);
             }
