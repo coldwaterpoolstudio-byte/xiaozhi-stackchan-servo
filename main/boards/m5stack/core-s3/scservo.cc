@@ -215,16 +215,17 @@ void ScServo::moveWithSpeed(int position_01deg, int speed_0_1000) {
     // Goal Position (BIG-ENDIAN: high byte first, matches official SCSCL End=1 Host2SCS)
     data[0] = (uint8_t)((raw_pos >> 8) & 0xFF);
     data[1] = (uint8_t)(raw_pos & 0xFF);
-    // Goal Time = 10000/speed (unit=10ms). speed=500 -> Time=20 (official baseline).
-    // speed=300 (default, smoother) -> Time=33 (330ms). speed=100 -> Time=100 (1s, very slow).
-    int goal_time = 10000 / (speed_0_1000 > 0 ? speed_0_1000 : 1);
-    if (goal_time < 5) goal_time = 5;      // min 50ms
-    if (goal_time > 200) goal_time = 200;   // max 2000ms
-    data[2] = (uint8_t)((goal_time >> 8) & 0xFF);
-    data[3] = (uint8_t)(goal_time & 0xFF);
-    // Goal Speed = 0 (big-endian; matches official StackChan WritePos Speed=0 = max speed, Time controls duration)
-    data[4] = 0x00;
-    data[5] = 0x00;
+    // SCS0009: Goal Time register may not be effective on this model.
+    // Use Goal Speed directly: 0=max speed, higher=slower (unit: 0.1% of max speed? tested empirically).
+    // Goal Time = 0 (unused), Goal Speed = speed_0_1000 (clamped 0-1000).
+    // speed=100 -> very slow, speed=300 -> moderate, speed=500 -> fast, speed=0 -> max speed.
+    data[2] = 0x00;  // Goal Time high byte = 0
+    data[3] = 0x00;  // Goal Time low byte = 0
+    int goal_speed = speed_0_1000;
+    if (goal_speed < 0) goal_speed = 0;
+    if (goal_speed > 1000) goal_speed = 1000;
+    data[4] = (uint8_t)((goal_speed >> 8) & 0xFF);
+    data[5] = (uint8_t)(goal_speed & 0xFF);
     writeRegister(kRegGoalPosition, data, 6);
 
     // Async stall protection: start one-shot task (does not block main thread)
