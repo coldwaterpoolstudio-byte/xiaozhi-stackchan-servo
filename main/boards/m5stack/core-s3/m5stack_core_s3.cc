@@ -82,6 +82,12 @@ public:
         WriteReg(0x03, 0b10000011);
         vTaskDelay(pdMS_TO_TICKS(10));
     }
+
+    void DumpOutputRegisters() {
+        uint8_t p0 = ReadReg(0x02);
+        uint8_t p1 = ReadReg(0x03);
+        ESP_LOGI(TAG, "DIAG AW9523: P0_out=0x%02X (bit1=BUS_OUT_EN) P1_out=0x%02X (bit7=BOOST_EN)", p0, p1);
+    }
 };
 
 class Ft6336 : public I2cDevice {
@@ -127,12 +133,12 @@ public:
         // Base class creates device at 400kHz. PY32L020 official spec is 100kHz.
         // Re-add at 100kHz to match official hal_io_expander.cpp and avoid data corruption.
         i2c_master_bus_rm_device(i2c_device_);
+        // Match official PY32IOExpander_Class constructor exactly:
+        // only dev_addr_length, device_address, scl_speed_hz. No scl_wait_us, no flags.
         i2c_device_config_t cfg = {
             .dev_addr_length = I2C_ADDR_BIT_LEN_7,
             .device_address = addr,
             .scl_speed_hz = 100 * 1000,
-            .scl_wait_us = 50000,
-            .flags = {.disable_ack_check = 0},
         };
         i2c_master_bus_add_device(i2c_bus, &cfg, &i2c_device_);
     }
@@ -142,6 +148,16 @@ public:
     bool Begin() {
         ESP_LOGI(TAG, "PY32L020 initialized at 0x%02X", addr_);
         return true;
+    }
+
+    void DumpVmEnRegisters() {
+        uint8_t d_dir = ReadReg(0x03);
+        uint8_t d_pu  = ReadReg(0x09);
+        uint8_t d_pd  = ReadReg(0x0B);
+        uint8_t d_drv = ReadReg(0x13);
+        uint8_t d_out = ReadReg(0x05);
+        ESP_LOGI(TAG, "DIAG PY32 VM_EN: dir=0x%02X pu=0x%02X pd=0x%02X drv=0x%02X out=0x%02X (expect bit0 set in dir/out, bit0 set in pu, bit0 clear in pd/drv)",
+                 d_dir, d_pu, d_pd, d_drv, d_out);
     }
 
     // Enable servo power (VM_EN on pin 0)
@@ -565,6 +581,20 @@ public:
         // StackChan servo MCP: enable voice-controlled head movement via cloud AI
         servo_mcp_ = new ServoMcpTool();
         servo_mcp_->Initialize();
+
+        // === DELAYED DIAGNOSTICS (USB serial stable by now, ~3.5s after boot) ===
+        if (py32_) {
+            py32_->DumpVmEnRegisters();
+        } else {
+            ESP_LOGW(TAG, "DIAG: py32_ is NULL — servo power NOT enabled");
+        }
+        if (aw9523_) {
+            aw9523_->DumpOutputRegisters();
+        }
+        int yaw_pos = servo_mcp_->GetYawServo()->getCurrentAngle();
+        int pitch_pos = servo_mcp_->GetPitchServo()->getCurrentAngle();
+        ESP_LOGI(TAG, "DIAG Servo response: yaw=%d pitch=%d (non-zero=powered & responsive, zero=unpowered or no-ack)", yaw_pos, pitch_pos);
+
         // LED MCP tool: voice-controlled RGB light strip
         RegisterLedMcpTool();
         GetBacklight()->RestoreBrightness();

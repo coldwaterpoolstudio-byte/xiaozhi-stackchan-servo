@@ -9,6 +9,8 @@ public:
     ServoMcpTool();
     ~ServoMcpTool();
     void Initialize();
+    ScServo* GetYawServo() { return yaw_servo_.get(); }
+    ScServo* GetPitchServo() { return pitch_servo_.get(); }
 
 private:
     std::unique_ptr<ScServo> yaw_servo_;

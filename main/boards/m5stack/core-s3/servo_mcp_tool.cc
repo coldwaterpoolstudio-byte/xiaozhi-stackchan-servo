@@ -11,11 +11,13 @@ ServoMcpTool::ServoMcpTool() {}
 ServoMcpTool::~ServoMcpTool() {}
 
 void ServoMcpTool::Initialize() {
-    ESP_LOGI(TAG, "Initializing SCS0009 servos on UART1 (GPIO7 TX, GPIO6 RX)");
+    ESP_LOGI(TAG, "Initializing SCS0009 servos on UART1 (GPIO6 TX, GPIO7 RX)");
 
     // Official StackChan zero positions: yaw=460, pitch=620
-    yaw_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_7, GPIO_NUM_6, 1, 460);
-    pitch_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_7, GPIO_NUM_6, 2, 620);
+    // Official SCSerial::begin(uart, baud, tx_pin, rx_pin) = begin(1, 1000000, 6, 7)
+    // So tx=GPIO6, rx=GPIO7. Previously had them REVERSED (tx=7,rx=6) — servo never received data.
+    yaw_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_6, GPIO_NUM_7, 1, 460);
+    pitch_servo_ = std::make_unique<ScServo>(UART_NUM_1, GPIO_NUM_6, GPIO_NUM_7, 2, 620);
 
     yaw_servo_->init();
     pitch_servo_->init();

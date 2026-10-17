@@ -9,12 +9,12 @@ static const char* TAG = "ScServo";
 static constexpr uint8_t kScsInstWrite = 0x03;
 static constexpr uint8_t kScsInstRead = 0x02;
 
-// SCS0009 registers (SCS series: LITTLE-ENDIAN, low byte first)
-static constexpr uint8_t kRegGoalPosition = 0x2A;  // 2 bytes, little-endian
-static constexpr uint8_t kRegGoalTime = 0x2C;       // 2 bytes, little-endian; effective when speed=0
-static constexpr uint8_t kRegGoalSpeed = 0x2E;      // 2 bytes, little-endian
+// SCS0009 registers (SCS series: BIG-ENDIAN, high byte first (matches official SCSCL End=1))
+static constexpr uint8_t kRegGoalPosition = 0x2A;  // 2 bytes, big-endian
+static constexpr uint8_t kRegGoalTime = 0x2C;       // 2 bytes, big-endian; effective when speed=0
+static constexpr uint8_t kRegGoalSpeed = 0x2E;      // 2 bytes, big-endian
 static constexpr uint8_t kRegTorqueEnable = 0x28;   // 1 byte
-static constexpr uint8_t kRegCurrentPosition = 0x38; // 2 bytes, little-endian, read-only
+static constexpr uint8_t kRegCurrentPosition = 0x38; // 2 bytes, big-endian, read-only
 
 ScServo::ScServo(uart_port_t uart_num, gpio_num_t tx_pin, gpio_num_t rx_pin, int servo_id, int center_raw)
     : uart_num_(uart_num), tx_pin_(tx_pin), rx_pin_(rx_pin), servo_id_(servo_id), center_raw_(center_raw) {}
@@ -163,13 +163,13 @@ void ScServo::moveWithSpeed(int position_01deg, int speed_0_1000) {
     // Writing them as separate register writes can leave servo at default speed=0 (stopped).
     // Reference: Qiita Ninagawa123 SCS0009 direct drive example.
     uint8_t data[6];
-    // Goal Position (LITTLE-ENDIAN: low byte first, per Feetech protocol manual Example 4)
-    data[0] = (uint8_t)(raw_pos & 0xFF);
-    data[1] = (uint8_t)((raw_pos >> 8) & 0xFF);
-    // Goal Time = 20 (little-endian; matches official StackChan WritePos Time=20)
-    data[2] = 20;
-    data[3] = 0x00;
-    // Goal Speed = 0 (little-endian; matches official StackChan WritePos Speed=0)
+    // Goal Position (BIG-ENDIAN: high byte first, matches official SCSCL End=1 Host2SCS)
+    data[0] = (uint8_t)((raw_pos >> 8) & 0xFF);
+    data[1] = (uint8_t)(raw_pos & 0xFF);
+    // Goal Time = 20 (big-endian; matches official StackChan WritePos Time=20)
+    data[2] = 0x00;
+    data[3] = 20;
+    // Goal Speed = 0 (big-endian; matches official StackChan WritePos Speed=0)
     data[4] = 0x00;
     data[5] = 0x00;
     writeRegister(kRegGoalPosition, data, 6);
@@ -180,8 +180,8 @@ int ScServo::getCurrentAngle() {
     if (!readRegister(kRegCurrentPosition, data, 2)) {
         return 0;
     }
-    // SCS series: LITTLE-ENDIAN (low byte first)
-    int raw = data[0] | (data[1] << 8);
+    // SCS series: BIG-ENDIAN (high byte first, matches official SCSCL End=1)
+    int raw = (data[0] << 8) | data[1];
     return rawToAngle(raw);
 }
 
